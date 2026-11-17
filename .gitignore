@@ -1,0 +1,15 @@
+node_modules
+.idea
+.env
+.DS_Store
+
+# Hardhat
+cache
+artifacts
+coverage
+coverage.json
+typechain-types
+
+# Frontend
+frontend/node_modules
+frontend/dist
