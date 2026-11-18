@@ -1,4 +1,4 @@
-import { formatEth } from "../lib/eth";
+import { formatCook } from "../lib/eth";
 import { challengeStatus, formatRemaining } from "../lib/status";
 import { Chef } from "./Chef";
 
@@ -9,7 +9,7 @@ export function ChallengeCard({ summary: s, now }) {
       <div className="challenge-card-top">
         <span className={`badge badge-${status.key}`}>{status.label}</span>
         <span className="reward">
-          {formatEth(s.reward)} <small>ETH</small>
+          {formatCook(s.reward)} <small>COOK</small>
         </span>
       </div>
       <h3 className="challenge-title">{s.name}</h3>

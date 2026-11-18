@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { ethers } from "ethers";
-import { MAX_DURATION_SECONDS, MIN_DURATION_SECONDS, NAME_MAX, NAME_MIN } from "../config";
+import { FACTORY_ADDRESS, MAX_DURATION_SECONDS, MIN_DURATION_SECONDS, NAME_MAX, NAME_MIN } from "../config";
 import { useCookoff } from "../context";
-import { factoryInterface, getFactory } from "../lib/eth";
+import { factoryInterface, formatCook, getFactory, getToken, isUserRejection, parseError } from "../lib/eth";
 import { goTo } from "../lib/hooks";
 
 const UNITS = { min: 60, h: 3600, d: 86400 };
@@ -14,12 +14,13 @@ const IDEAS = [
 ];
 
 export function CreateChallenge() {
-  const { runTx } = useCookoff();
+  const { runTx, wallet, balance, toast } = useCookoff();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("3");
   const [unit, setUnit] = useState("d");
-  const [reward, setReward] = useState("0.01");
+  const [reward, setReward] = useState("50");
+  const [step, setStep] = useState(null);
   const [touched, setTouched] = useState(false);
 
   const trimmed = name.trim();
@@ -48,7 +49,12 @@ export function CreateChallenge() {
         : duration > MAX_DURATION_SECONDS
           ? "Duração máxima: 30 dias."
           : null,
-    reward: !rewardWei || rewardWei <= 0n ? "Informe uma recompensa maior que zero." : null,
+    reward:
+      !rewardWei || rewardWei <= 0n
+        ? "Informe uma recompensa maior que zero."
+        : balance.loaded && rewardWei > balance.cook
+          ? `Você tem só ${formatCook(balance.cook)} COOK. Compre mais na Carteira COOK.`
+          : null,
   };
   const valid = !errors.name && !errors.duration && !errors.reward;
 
@@ -56,9 +62,32 @@ export function CreateChallenge() {
     e.preventDefault();
     setTouched(true);
     if (!valid) return;
-    const receipt = await runTx("Criar desafio", async (signer) =>
-      getFactory(signer).createChallenge(trimmed, duration, { value: rewardWei })
+
+    let account = wallet.account;
+    try {
+      account = account ?? (await wallet.connect());
+    } catch (err) {
+      if (!isUserRejection(err)) toast(parseError(err), "error");
+      return;
+    }
+    if (!account) return;
+
+    // ERC-20: a fábrica só pode puxar os COOK da sua carteira se você autorizar
+    // antes (approve). Se a autorização atual já cobre o valor, pulamos essa etapa.
+    const allowance = await getToken().allowance(account, FACTORY_ADDRESS);
+    if (allowance < rewardWei) {
+      setStep(1);
+      const approved = await runTx(`Autorizar ${formatCook(rewardWei)} COOK (1/2)`, (signer) =>
+        getToken(signer).approve(FACTORY_ADDRESS, rewardWei)
+      );
+      if (!approved) return setStep(null);
+    }
+
+    setStep(2);
+    const receipt = await runTx(allowance < rewardWei ? "Criar desafio (2/2)" : "Criar desafio", (signer) =>
+      getFactory(signer).createChallenge(trimmed, duration, rewardWei)
     );
+    setStep(null);
     if (!receipt) return;
     const created = receipt.logs
       .map((log) => {
@@ -146,23 +175,34 @@ export function CreateChallenge() {
             <input
               type="number"
               min="0"
-              step="0.001"
+              step="1"
               value={reward}
               onChange={(e) => setReward(e.target.value)}
             />
-            <span className="input-suffix">ETH</span>
+            <span className="input-suffix">COOK</span>
           </div>
-          {touched && errors.reward && <span className="field-error">{errors.reward}</span>}
+          {touched && errors.reward ? (
+            <span className="field-error">{errors.reward}</span>
+          ) : (
+            <span className="field-hint">
+              {balance.loaded ? `Seu saldo: ${formatCook(balance.cook)} COOK` : "Pago em COOK, o token do COOKOFF."}
+            </span>
+          )}
         </label>
       </div>
 
       <p className="muted small">
-        A recompensa fica guardada no contrato do desafio. Você pode encerrá-lo a qualquer momento; se ninguém
-        receber votos, o valor volta para você.
+        Serão duas confirmações na carteira: <b>autorizar</b> a fábrica a usar seus COOK (approve) e{" "}
+        <b>criar</b> o desafio. Os COOK ficam guardados no contrato do desafio; se ninguém receber votos, voltam
+        para você.
       </p>
 
-      <button className="btn btn-primary btn-block" type="submit" disabled={touched && !valid}>
-        Criar desafio e depositar {reward || "0"} ETH
+      <button className="btn btn-primary btn-block" type="submit" disabled={(touched && !valid) || step !== null}>
+        {step === 1
+          ? "Autorizando COOK (1/2)…"
+          : step === 2
+            ? "Criando desafio…"
+            : `Criar desafio com ${reward || "0"} COOK`}
       </button>
     </form>
   );

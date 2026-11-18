@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CookoffContext } from "./context";
-import { FACTORY_ADDRESS, TARGET_CHAIN, TARGET_CHAIN_ID } from "./config";
-import { formatEth, getFactory, getSigner, isUserRejection, parseError, sameAddress, shortAddress, toSummary } from "./lib/eth";
+import { FACTORY_ADDRESS, TARGET_CHAIN, TARGET_CHAIN_ID, TOKEN_ADDRESS, WELCOME_BONUS } from "./config";
+import {
+  formatCook,
+  getFactory,
+  getReadProvider,
+  getSigner,
+  getToken,
+  isUserRejection,
+  parseError,
+  sameAddress,
+  shortAddress,
+  toSummary,
+} from "./lib/eth";
 import { subscribeCookoffEvents } from "./lib/events";
 import { useHashRoute, useWallet } from "./lib/hooks";
 import { Header } from "./components/Header";
@@ -10,6 +21,9 @@ import { ChallengePage } from "./components/ChallengePage";
 import { Toasts, useToasts } from "./components/Toasts";
 import { Confetti } from "./components/Confetti";
 import { TxBanner } from "./components/TxBanner";
+
+const READY = !!FACTORY_ADDRESS && !!TOKEN_ADDRESS;
+const EMPTY_BALANCE = { cook: 0n, eth: 0n, claimed: false, loaded: false };
 
 export default function App() {
   const wallet = useWallet();
@@ -22,12 +36,15 @@ export default function App() {
   const [feed, setFeed] = useState([]);
   const [busy, setBusy] = useState(null);
   const [celebrate, setCelebrate] = useState(0);
+  const [balance, setBalance] = useState(EMPTY_BALANCE);
+  const accountRef = useRef(wallet.account);
+  accountRef.current = wallet.account;
 
   // ------------------------------------------------------------------
   // Leitura do estado (factory.getAllSummaries chama cada Challenge)
   // ------------------------------------------------------------------
   const refresh = useCallback(async () => {
-    if (!FACTORY_ADDRESS) return;
+    if (!READY) return;
     try {
       const list = await getFactory().getAllSummaries();
       setSummaries(list.map(toSummary));
@@ -44,6 +61,50 @@ export default function App() {
     refresh();
   }, [refresh]);
 
+  // ------------------------------------------------------------------
+  // Saldo da carteira conectada (COOK, ETH e se já resgatou o bônus)
+  // ------------------------------------------------------------------
+  const refreshBalance = useCallback(async () => {
+    const account = accountRef.current;
+    if (!READY || !account) return setBalance(EMPTY_BALANCE);
+    try {
+      const token = getToken();
+      const [cook, eth, claimed] = await Promise.all([
+        token.balanceOf(account),
+        getReadProvider().getBalance(account),
+        token.hasClaimedBonus(account),
+      ]);
+      if (sameAddress(account, accountRef.current)) setBalance({ cook, eth, claimed, loaded: true });
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
+  // Recarrega quando a conta muda e escuta Transfer do COOK envolvendo a conta
+  // (bônus, compra, depósito em desafio, prêmio recebido...)
+  useEffect(() => {
+    setBalance(EMPTY_BALANCE);
+    refreshBalance();
+    if (!READY || !wallet.account) return;
+    const token = getToken();
+    const incoming = token.filters.Transfer(null, wallet.account);
+    const outgoing = token.filters.Transfer(wallet.account, null);
+    // O polling pode entregar o mesmo log mais de uma vez quando vários blocos
+    // saem entre duas consultas: agrupamos as notificações numa só releitura.
+    let timer;
+    const onTransfer = () => {
+      clearTimeout(timer);
+      timer = setTimeout(refreshBalance, 300);
+    };
+    token.on(incoming, onTransfer);
+    token.on(outgoing, onTransfer);
+    return () => {
+      clearTimeout(timer);
+      token.off(incoming, onTransfer);
+      token.off(outgoing, onTransfer);
+    };
+  }, [wallet.account, refreshBalance]);
+
   const refreshTimer = useRef();
   const refreshSoon = useCallback(() => {
     clearTimeout(refreshTimer.current);
@@ -54,9 +115,7 @@ export default function App() {
   // Captura de eventos → feed ao vivo, toasts, celebração e refresh
   // ------------------------------------------------------------------
   const listeners = useRef(new Set());
-  const accountRef = useRef(wallet.account);
   const summariesRef = useRef(summaries);
-  accountRef.current = wallet.account;
   summariesRef.current = summaries;
 
   const onEvent = useCallback((listener) => {
@@ -65,7 +124,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!FACTORY_ADDRESS) return;
+    if (!READY) return;
     const nameOf = (addr) => summariesRef.current.find((s) => sameAddress(s.address, addr))?.name ?? "um desafio";
 
     return subscribeCookoffEvents((ev) => {
@@ -81,7 +140,7 @@ export default function App() {
       switch (ev.type) {
         case "ChallengeCreated":
           if (!sameAddress(ev.creator, me)) {
-            toast(`🆕 Novo desafio: “${ev.name}” valendo ${formatEth(ev.reward)} ETH`, "info", () =>
+            toast(`🆕 Novo desafio: “${ev.name}” valendo ${formatCook(ev.reward)} COOK`, "info", () =>
               (window.location.hash = `/desafio/${ev.challenge}`)
             );
           }
@@ -91,7 +150,7 @@ export default function App() {
           break;
         case "ChallengeFinalized":
           if (sameAddress(ev.winner, me)) {
-            toast(`🏆 Você venceu “${nameOf(ev.challenge)}” e recebeu ${formatEth(ev.reward)} ETH!`, "win");
+            toast(`🏆 Você venceu “${nameOf(ev.challenge)}” e recebeu ${formatCook(ev.reward)} COOK!`, "win");
             setCelebrate((c) => c + 1);
           } else if (ev.winner && ev.winner !== "0x0000000000000000000000000000000000000000") {
             toast(`🏁 “${nameOf(ev.challenge)}” encerrado — vitória de ${shortAddress(ev.winner)}`, "info");
@@ -99,8 +158,9 @@ export default function App() {
             toast(`🏁 “${nameOf(ev.challenge)}” encerrado sem votos`, "info");
           }
           break;
-        case "RewardPending":
-          if (sameAddress(ev.to, me)) toast("💰 Você tem uma recompensa aguardando saque.", "win");
+        case "WelcomeBonusClaimed":
+        case "TokensPurchased":
+          // só aparecem no feed; para a própria conta o runTx já avisa
           break;
         default:
       }
@@ -133,6 +193,7 @@ export default function App() {
         if (receipt.status !== 1) throw new Error("A transação falhou.");
         toast(`✅ ${label}: confirmado!`, "success");
         refreshSoon();
+        refreshBalance();
         return receipt;
       } catch (err) {
         if (!isUserRejection(err)) {
@@ -144,19 +205,51 @@ export default function App() {
         setBusy(null);
       }
     },
-    [wallet, toast, refreshSoon]
+    [wallet, toast, refreshSoon, refreshBalance]
   );
 
+  // ------------------------------------------------------------------
+  // "Login": conecta a carteira e, no primeiro acesso, minta o bônus de
+  // boas-vindas (claimWelcomeBonus) para o usuário já ter COOK.
+  // ------------------------------------------------------------------
+  const login = useCallback(async () => {
+    try {
+      const account = await wallet.connect();
+      if (!account || !READY) return;
+      const claimed = await getToken().hasClaimedBonus(account);
+      if (!claimed) {
+        toast(`🎁 Bem-vindo! Confirme na carteira para receber ${WELCOME_BONUS} COOK grátis.`, "info");
+        await runTx(`Bônus de boas-vindas (${WELCOME_BONUS} COOK)`, (signer) => getToken(signer).claimWelcomeBonus());
+      }
+    } catch (err) {
+      if (!isUserRejection(err)) toast(parseError(err), "error");
+    }
+  }, [wallet, runTx, toast]);
+
   const ctx = useMemo(
-    () => ({ wallet, summaries, loading, loadError, refresh, runTx, busy, onEvent, feed, toast }),
-    [wallet, summaries, loading, loadError, refresh, runTx, busy, onEvent, feed, toast]
+    () => ({
+      wallet,
+      login,
+      balance,
+      refreshBalance,
+      summaries,
+      loading,
+      loadError,
+      refresh,
+      runTx,
+      busy,
+      onEvent,
+      feed,
+      toast,
+    }),
+    [wallet, login, balance, refreshBalance, summaries, loading, loadError, refresh, runTx, busy, onEvent, feed, toast]
   );
 
   return (
     <CookoffContext.Provider value={ctx}>
       <Header />
       <main className="shell">
-        {!FACTORY_ADDRESS ? (
+        {!READY ? (
           <NotDeployed />
         ) : route.page === "challenge" ? (
           <ChallengePage key={route.address} address={route.address} />
@@ -186,7 +279,8 @@ function NotDeployed() {
       <div className="empty-emoji">🧑‍🍳</div>
       <h2>A cozinha ainda não abriu</h2>
       <p>
-        Nenhuma CookoffFactory implantada na rede <b>{TARGET_CHAIN.name}</b> (chainId {TARGET_CHAIN_ID}).
+        CookToken e CookoffFactory ainda não foram implantados na rede <b>{TARGET_CHAIN.name}</b> (chainId{" "}
+        {TARGET_CHAIN_ID}). Se você tinha um deploy antigo (sem token), implante de novo.
       </p>
       <pre className="code">
         {TARGET_CHAIN_ID === 31337

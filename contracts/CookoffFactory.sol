@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./Challenge.sol";
 
 /// @title CookoffFactory — contrato principal do COOKOFF
 /// @notice Funciona como Contract Factory: cada chamada a createChallenge()
-///         implanta um novo contrato Challenge, repassando a recompensa em ETH.
+///         implanta um novo contrato Challenge e transfere para ele a recompensa
+///         em tokens COOK (CookToken) do criador.
 ///         A fábrica também interage com os desafios criados (finalizeChallenge,
 ///         getChallengeSummary) e recebe deles a notificação de encerramento
 ///         para manter um ranking global de chefs.
 contract CookoffFactory {
+    using SafeERC20 for IERC20;
+
     // ------------------------------------------------------------------
     // Constantes
     // ------------------------------------------------------------------
@@ -21,6 +26,7 @@ contract CookoffFactory {
     // ------------------------------------------------------------------
     // Estado
     // ------------------------------------------------------------------
+    IERC20 public immutable rewardToken; // CookToken (COOK)
     Challenge[] public challenges;
     mapping(address => uint256) private challengeIdPlusOne; // 0 = não é um desafio desta fábrica
     mapping(address => uint256[]) private challengesByCreator;
@@ -58,8 +64,19 @@ contract CookoffFactory {
         _;
     }
 
-    modifier withReward() {
-        require(msg.value > 0, "Informe uma recompensa em ETH");
+    modifier withReward(uint256 reward) {
+        require(reward > 0, "Informe uma recompensa em COOK");
+        _;
+    }
+
+    /// @dev Confere saldo e autorização (approve) antes de tentar transferir,
+    ///      para devolver uma mensagem clara em vez do erro genérico do ERC-20.
+    modifier canFundReward(uint256 reward) {
+        require(rewardToken.balanceOf(msg.sender) >= reward, "Saldo de COOK insuficiente");
+        require(
+            rewardToken.allowance(msg.sender, address(this)) >= reward,
+            "Autorize a fabrica a usar seus COOK (approve)"
+        );
         _;
     }
 
@@ -80,37 +97,51 @@ contract CookoffFactory {
         _;
     }
 
+    constructor(IERC20 _rewardToken) {
+        rewardToken = _rewardToken;
+    }
+
     // ------------------------------------------------------------------
     // Factory
     // ------------------------------------------------------------------
 
-    /// @notice Cria um novo desafio. O ETH enviado vira a recompensa do vencedor.
+    /// @notice Cria um novo desafio. `reward` COOK saem da carteira do criador e
+    ///         ficam guardados no contrato do desafio até o encerramento.
+    ///         Antes, o criador precisa chamar rewardToken.approve(fabrica, reward).
     /// @param challengeName nome do desafio (deve conter "Desafio")
     /// @param duration duração em segundos até o encerramento automático
-    function createChallenge(string calldata challengeName, uint256 duration)
+    /// @param reward recompensa em COOK (com 18 casas decimais)
+    function createChallenge(string calldata challengeName, uint256 duration, uint256 reward)
         external
-        payable
         validChallengeName(challengeName)
-        withReward
+        withReward(reward)
         validDuration(duration)
+        canFundReward(reward)
+        returns (uint256 challengeId, address challengeAddress)
+    {
+        // O corpo fica numa função privada: os argumentos dos 4 modifiers também
+        // ocupam a pilha da EVM (limite de 16 posições) e estourariam o limite
+        // ("stack too deep") se toda a lógica ficasse aqui.
+        return _createChallenge(challengeName, block.timestamp + duration, reward);
+    }
+
+    function _createChallenge(string calldata challengeName, uint256 deadline, uint256 reward)
+        private
         returns (uint256 challengeId, address challengeAddress)
     {
         challengeId = challenges.length;
-        uint256 deadline = block.timestamp + duration;
 
-        Challenge challenge = new Challenge{value: msg.value}(
-            challengeId,
-            challengeName,
-            msg.sender,
-            deadline
-        );
+        Challenge challenge = new Challenge(challengeId, challengeName, msg.sender, deadline, rewardToken, reward);
         challengeAddress = address(challenge);
 
         challenges.push(challenge);
         challengeIdPlusOne[challengeAddress] = challengeId + 1;
         challengesByCreator[msg.sender].push(challengeId);
 
-        emit ChallengeCreated(challengeId, challengeAddress, msg.sender, challengeName, msg.value, deadline);
+        // Move a recompensa: criador -> contrato do desafio (usa o approve)
+        rewardToken.safeTransferFrom(msg.sender, challengeAddress, reward);
+
+        emit ChallengeCreated(challengeId, challengeAddress, msg.sender, challengeName, reward, deadline);
     }
 
     // ------------------------------------------------------------------

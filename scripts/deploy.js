@@ -1,4 +1,5 @@
-// Implanta a CookoffFactory e exporta ABI + endereço para o frontend.
+// Implanta o CookToken (COOK) e a CookoffFactory, e exporta ABIs + endereços
+// para o frontend.
 //
 //   npx hardhat node                     (em outro terminal, para rede local)
 //   npm run deploy:local                 (rede localhost / 31337)
@@ -31,34 +32,43 @@ async function main() {
   console.log("Conta deployer:  ", deployer.address);
   console.log("Saldo:           ", ethers.formatEther(balance), "ETH");
 
-  const factory = await ethers.deployContract("CookoffFactory");
-  await factory.waitForDeployment();
-  const address = await factory.getAddress();
-  const receipt = await factory.deploymentTransaction().wait();
+  // 1. Token: a factory precisa do endereço dele no construtor
+  const token = await ethers.deployContract("CookToken");
+  await token.waitForDeployment();
+  const tokenAddress = await token.getAddress();
+  const tokenReceipt = await token.deploymentTransaction().wait();
+  console.log("CookToken:       ", tokenAddress);
 
-  console.log("CookoffFactory:  ", address);
-  console.log("Bloco:           ", receipt.blockNumber);
+  // 2. Factory, apontando para o token
+  const factory = await ethers.deployContract("CookoffFactory", [tokenAddress]);
+  await factory.waitForDeployment();
+  const factoryAddress = await factory.getAddress();
+  await factory.deploymentTransaction().wait();
+  console.log("CookoffFactory:  ", factoryAddress);
+  console.log("Bloco inicial:   ", tokenReceipt.blockNumber);
 
   const { chainId } = await ethers.provider.getNetwork();
-  exportFrontendFiles(Number(chainId), address, receipt.blockNumber);
+  exportFrontendFiles(Number(chainId), { CookToken: tokenAddress, CookoffFactory: factoryAddress }, tokenReceipt.blockNumber);
 
   if (network.name === "sepolia") {
-    console.log(`\nEtherscan: https://sepolia.etherscan.io/address/${address}`);
-    console.log(`Para verificar o código: npx hardhat verify --network sepolia ${address}`);
+    console.log(`\nEtherscan: https://sepolia.etherscan.io/address/${factoryAddress}`);
+    console.log("Para verificar o código:");
+    console.log(`  npx hardhat verify --network sepolia ${tokenAddress}`);
+    console.log(`  npx hardhat verify --network sepolia ${factoryAddress} ${tokenAddress}`);
   }
 }
 
-function exportFrontendFiles(chainId, factoryAddress, blockNumber) {
+function exportFrontendFiles(chainId, contracts, blockNumber) {
   fs.mkdirSync(FRONTEND_CONTRACTS_DIR, { recursive: true });
 
-  for (const name of ["CookoffFactory", "Challenge"]) {
+  for (const name of ["CookToken", "CookoffFactory", "Challenge"]) {
     const { abi } = hre.artifacts.readArtifactSync(name);
     fs.writeFileSync(path.join(FRONTEND_CONTRACTS_DIR, `${name}.json`), JSON.stringify({ abi }, null, 2) + "\n");
   }
 
   const addressesFile = path.join(FRONTEND_CONTRACTS_DIR, "addresses.json");
   const addresses = fs.existsSync(addressesFile) ? JSON.parse(fs.readFileSync(addressesFile, "utf8")) : {};
-  addresses[String(chainId)] = { CookoffFactory: factoryAddress, deployBlock: blockNumber };
+  addresses[String(chainId)] = { ...contracts, deployBlock: blockNumber };
   fs.writeFileSync(addressesFile, JSON.stringify(addresses, null, 2) + "\n");
 
   console.log("ABIs e endereço exportados para", path.relative(process.cwd(), FRONTEND_CONTRACTS_DIR));

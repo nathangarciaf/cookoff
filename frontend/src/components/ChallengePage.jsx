@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FACTORY_ADDRESS, MAX_VOTES_PER_USER, RECIPE_NAME_MAX } from "../config";
+import { FACTORY_ADDRESS, MAX_VOTES_PER_USER, RECIPE_NAME_MAX, TOKEN_ADDRESS } from "../config";
 import { useCookoff } from "../context";
-import { explorerUrl, formatEth, getChallenge, getFactory, parseError, sameAddress, toRecipe, toSummary } from "../lib/eth";
+import { explorerUrl, formatCook, getChallenge, getFactory, parseError, sameAddress, toRecipe, toSummary } from "../lib/eth";
 import { useNow } from "../lib/hooks";
 import { challengeStatus, formatDate, formatRemaining } from "../lib/status";
 import { Chef } from "./Chef";
@@ -13,7 +13,7 @@ export function ChallengePage({ address }) {
 
   const [summary, setSummary] = useState(null);
   const [recipes, setRecipes] = useState([]);
-  const [mine, setMine] = useState({ used: 0, votedFor: new Set(), pending: 0n });
+  const [mine, setMine] = useState({ used: 0, votedFor: new Set() });
   const [error, setError] = useState(null);
   const [flash, setFlash] = useState({});
   const [recipeName, setRecipeName] = useState("");
@@ -33,16 +33,14 @@ export function ChallengePage({ address }) {
       const [rawSummary, rawRecipes] = await Promise.all([challenge.getSummary(), challenge.getRecipes()]);
       const recs = rawRecipes.map(toRecipe);
 
-      let personal = { used: 0, votedFor: new Set(), pending: 0n };
+      let personal = { used: 0, votedFor: new Set() };
       if (account) {
-        const [used, pending, ...voted] = await Promise.all([
+        const [used, ...voted] = await Promise.all([
           challenge.votesUsed(account),
-          challenge.pendingWithdrawals(account),
           ...recs.map((r) => challenge.hasVotedFor(account, r.id)),
         ]);
         personal = {
           used: Number(used),
-          pending,
           votedFor: new Set(recs.filter((_, i) => voted[i]).map((r) => r.id)),
         };
       }
@@ -149,11 +147,6 @@ export function ChallengePage({ address }) {
     load();
   };
 
-  const withdraw = async () => {
-    await runTx("Sacar recompensa", (signer) => getChallenge(address, signer).withdraw());
-    load();
-  };
-
   return (
     <>
       <a className="back" href="#/">← Desafios</a>
@@ -180,7 +173,7 @@ export function ChallengePage({ address }) {
           <div className="prize">
             <span className="prize-label">Recompensa</span>
             <span className="prize-value">
-              {formatEth(summary.reward)} <small>ETH</small>
+              {formatCook(summary.reward)} <small>COOK</small>
             </span>
           </div>
           <div className="prize-time">
@@ -206,7 +199,7 @@ export function ChallengePage({ address }) {
                 <div className="eyebrow">Receita vencedora</div>
                 <h2>{winnerRecipe?.name}</h2>
                 <div>
-                  <Chef address={summary.winner} /> levou <b>{formatEth(summary.reward)} ETH</b> com{" "}
+                  <Chef address={summary.winner} /> levou <b>{formatCook(summary.reward)} COOK</b> com{" "}
                   {winnerRecipe?.votes} {winnerRecipe?.votes === 1 ? "voto" : "votos"}.
                 </div>
               </div>
@@ -216,7 +209,7 @@ export function ChallengePage({ address }) {
               <div className="result-trophy">🍂</div>
               <div>
                 <h2>Encerrado sem votos</h2>
-                <div className="muted">A recompensa foi devolvida ao criador do desafio.</div>
+                <div className="muted">Os COOK da recompensa foram devolvidos ao criador do desafio.</div>
               </div>
             </>
           )}
@@ -224,7 +217,7 @@ export function ChallengePage({ address }) {
       )}
 
       {/* Ações do criador / finalização / saque */}
-      {(status.key === "expired" || (isCreator && !summary.finalized) || mine.pending > 0n) && (
+      {(status.key === "expired" || (isCreator && !summary.finalized)) && (
         <section className="card actions-card">
           {status.key === "expired" && (
             <div className="action-row">
@@ -247,17 +240,6 @@ export function ChallengePage({ address }) {
               </div>
               <button className="btn btn-warn" onClick={closeEarly} disabled={!!busy}>
                 Encerrar agora
-              </button>
-            </div>
-          )}
-          {mine.pending > 0n && (
-            <div className="action-row">
-              <div>
-                <b>Você tem {formatEth(mine.pending)} ETH para sacar.</b>
-                <div className="muted small">O envio automático falhou; saque manualmente.</div>
-              </div>
-              <button className="btn btn-primary" onClick={withdraw} disabled={!!busy}>
-                Sacar
               </button>
             </div>
           )}
@@ -383,6 +365,8 @@ export function ChallengePage({ address }) {
               <dd className="mono small">{address}</dd>
               <dt>Fábrica</dt>
               <dd className="mono small">{FACTORY_ADDRESS}</dd>
+              <dt>Token COOK</dt>
+              <dd className="mono small">{TOKEN_ADDRESS}</dd>
             </dl>
           </section>
         </aside>

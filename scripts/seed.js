@@ -3,8 +3,9 @@
 //   npm run deploy:local        (terminal 2)
 //   npm run seed:local
 //
-// Usa as contas #0 a #9 do `hardhat node`. As contas #10 a #19 ficam "limpas"
-// para você importar no MetaMask e testar como um usuário novo.
+// Usa as contas #0 a #9 do `hardhat node`. Cada uma resgata o bônus de
+// boas-vindas e compra COOK com um pouco de ETH. As contas #10 a #19 ficam
+// "limpas" para você importar no MetaMask e testar como um usuário novo.
 
 const fs = require("fs");
 const path = require("path");
@@ -21,6 +22,7 @@ const DAY = 24 * HOUR;
 // Cenário. Em cada desafio:
 //   creator  → índice da conta que cria (e deposita a recompensa)
 //   minutes  → duração
+//   cook     → recompensa em COOK (sai da carteira do criador)
 //   recipes  → [autor, nome]   (o índice no array é o recipeId no contrato)
 //   votes    → [eleitor, recipeId]  (máx. 2 por eleitor, nunca na própria receita)
 //   close    → true = o criador encerra o desafio no fim do seed
@@ -30,7 +32,7 @@ const CHALLENGES = [
     creator: 0,
     name: "Desafio de Tortas Inusitadas",
     minutes: 3 * DAY,
-    eth: "0.5",
+    cook: "500",
     recipes: [
       [1, "Torta de Mirtilo com Queijo de Cabra"],
       [2, "Torta de Abóbora com Gorgonzola"],
@@ -45,7 +47,7 @@ const CHALLENGES = [
     creator: 1,
     name: "Desafio das Sopas de Inverno",
     minutes: 12 * HOUR,
-    eth: "0.2",
+    cook: "200",
     recipes: [
       [2, "Caldo Verde com Chips de Couve"],
       [3, "Creme de Mandioquinha com Gengibre"],
@@ -58,7 +60,7 @@ const CHALLENGES = [
     creator: 2,
     name: "Desafio do Prato com 5 Ingredientes",
     minutes: 2 * DAY,
-    eth: "0.3",
+    cook: "300",
     recipes: [
       [0, "Nhoque de Batata-Doce na Manteiga de Sálvia"],
       [4, "Risoto de Limão com Camarão"],
@@ -72,7 +74,7 @@ const CHALLENGES = [
     creator: 3,
     name: "Desafio de Comida de Boteco Gourmet",
     minutes: 5 * DAY,
-    eth: "1",
+    cook: "1000",
     recipes: [
       [5, "Bolinho de Feijoada com Couve Crocante"],
       [6, "Torresmo de Rolo com Goiabada Picante"],
@@ -87,7 +89,7 @@ const CHALLENGES = [
     creator: 4,
     name: "Desafio das Sobremesas Sem Forno",
     minutes: 1 * DAY,
-    eth: "0.15",
+    cook: "150",
     recipes: [
       [6, "Pavê de Paçoca com Doce de Leite"],
       [7, "Cheesecake de Maracujá na Taça"],
@@ -100,7 +102,7 @@ const CHALLENGES = [
     creator: 5,
     name: "Desafio Drinks sem Álcool",
     minutes: 30 * MIN,
-    eth: "0.1",
+    cook: "100",
     recipes: [],
     votes: [],
   },
@@ -110,7 +112,7 @@ const CHALLENGES = [
     creator: 6,
     name: "Desafio Relâmpago: Lanche em 10 Minutos",
     minutes: 2 * MIN,
-    eth: "0.05",
+    cook: "50",
     recipes: [
       [7, "Wrap de Frango com Pasta de Abacate"],
       [8, "Torrada de Ricota com Mel e Nozes"],
@@ -123,7 +125,7 @@ const CHALLENGES = [
     creator: 3,
     name: "Desafio do Pão Caseiro",
     minutes: 1 * HOUR,
-    eth: "0.3",
+    cook: "300",
     recipes: [
       [4, "Pão de Fermentação Natural com Azeitonas"],
       [2, "Focaccia de Alecrim e Tomate-Cereja"],
@@ -137,7 +139,7 @@ const CHALLENGES = [
     creator: 9,
     name: "Desafio Vegano de Churrasco",
     minutes: 2 * DAY,
-    eth: "0.4",
+    cook: "400",
     recipes: [
       [2, "Picanha de Melancia Defumada"],
       [1, "Espetinho de Cogumelos com Chimichurri"],
@@ -151,7 +153,7 @@ const CHALLENGES = [
     creator: 7,
     name: "Desafio de Marmitas Fit",
     minutes: 1 * DAY,
-    eth: "0.2",
+    cook: "200",
     recipes: [
       [4, "Escondidinho de Couve-Flor com Carne Moída"],
       [0, "Bowl de Quinoa com Salmão Grelhado"],
@@ -165,7 +167,7 @@ const CHALLENGES = [
     creator: 8,
     name: "Desafio da Culinária Nordestina",
     minutes: 1 * DAY,
-    eth: "0.25",
+    cook: "250",
     recipes: [
       [9, "Baião de Dois com Queijo Coalho Grelhado"],
       [0, "Escondidinho de Carne de Sol"],
@@ -184,13 +186,27 @@ const RULE_DEMOS = [
   { label: "Hugo vota num desafio já encerrado", run: (c) => c[7].contract.connect(c.s[7]).vote(0) },
   {
     label: "Fábio cria um desafio sem a palavra 'Desafio'",
-    run: (c) => c.factory.connect(c.s[5]).createChallenge("Torneio de Bolos", 3600, { value: 1n }),
+    run: (c) => c.factory.connect(c.s[5]).createChallenge("Torneio de Bolos", 3600, c.COOK("10")),
   },
   {
     label: "Gabi cria um desafio sem recompensa",
-    run: (c) => c.factory.connect(c.s[6]).createChallenge("Desafio de Bolos", 3600),
+    run: (c) => c.factory.connect(c.s[6]).createChallenge("Desafio de Bolos", 3600, 0),
+  },
+  {
+    label: "Gabi cria um desafio sem dar approve antes",
+    run: (c) => c.factory.connect(c.s[6]).createChallenge("Desafio de Bolos", 3600, c.COOK("10")),
+  },
+  {
+    label: "Iara oferece mais COOK do que tem",
+    run: (c) => c.factory.connect(c.s[8]).createChallenge("Desafio de Bolos", 3600, c.COOK("999999")),
+  },
+  {
+    label: "Hugo tenta resgatar o bônus de boas-vindas de novo",
+    run: (c) => c.token.connect(c.s[7]).claimWelcomeBonus(),
   },
 ];
+
+const ETH_PER_CHEF = "0.002"; // 0,002 ETH -> 2.000 COOK para cada chef
 
 function revertReason(err) {
   // Ex.: "...reverted with reason string 'O nome deve conter a palavra 'Desafio''"
@@ -208,29 +224,40 @@ async function main() {
   const addresses = JSON.parse(
     fs.readFileSync(path.join(__dirname, "..", "frontend", "src", "contracts", "addresses.json"), "utf8")
   );
-  const factoryAddress = addresses["31337"]?.CookoffFactory;
-  if (!factoryAddress) throw new Error("Rode `npm run deploy:local` antes do seed.");
+  const { CookoffFactory: factoryAddress, CookToken: tokenAddress } = addresses["31337"] ?? {};
+  if (!factoryAddress || !tokenAddress) throw new Error("Rode `npm run deploy:local` antes do seed.");
 
   const signers = (await ethers.getSigners()).slice(0, CHEFS.length);
   const factory = await ethers.getContractAt("CookoffFactory", factoryAddress);
+  const token = await ethers.getContractAt("CookToken", tokenAddress);
   const send = async (txPromise) => (await txPromise).wait();
+  const COOK = (n) => ethers.parseEther(String(n));
+  const fmt = (wei) => Number(ethers.formatEther(wei)).toLocaleString("pt-BR");
 
+  console.log(`CookToken      em ${tokenAddress}`);
   console.log(`CookoffFactory em ${factoryAddress}\n`);
+
+  // 0. Cada chef "faz login": resgata o bônus e compra COOK com pouco ETH
+  for (let i = 0; i < signers.length; i++) {
+    await send(token.connect(signers[i]).claimWelcomeBonus());
+    await send(token.connect(signers[i]).buyTokens({ value: ethers.parseEther(ETH_PER_CHEF) }));
+  }
+  const perChef = await token.balanceOf(signers[0].address);
+  console.log(`🪙 ${signers.length} chefs com ${fmt(perChef)} COOK cada (100 de bônus + ${ETH_PER_CHEF} ETH em compra)\n`);
 
   const created = [];
   for (const ch of CHALLENGES) {
-    // 1. Cria o desafio e descobre o endereço lendo o evento ChallengeCreated do recibo
-    const receipt = await send(
-      factory.connect(signers[ch.creator]).createChallenge(ch.name, ch.minutes * 60, {
-        value: ethers.parseEther(ch.eth),
-      })
-    );
+    // 1. Autoriza a fábrica a mover os COOK (approve) e cria o desafio.
+    //    O endereço do novo contrato vem do evento ChallengeCreated no recibo.
+    const reward = COOK(ch.cook);
+    await send(token.connect(signers[ch.creator]).approve(factoryAddress, reward));
+    const receipt = await send(factory.connect(signers[ch.creator]).createChallenge(ch.name, ch.minutes * 60, reward));
     const event = receipt.logs
       .map((log) => factory.interface.parseLog(log))
       .find((e) => e?.name === "ChallengeCreated");
     const contract = await ethers.getContractAt("Challenge", event.args.challenge);
     created.push({ ...ch, contract });
-    console.log(`🆕 ${ch.name}  (${ch.eth} ETH, por ${CHEFS[ch.creator]})  -> ${event.args.challenge}`);
+    console.log(`🆕 ${ch.name}  (${ch.cook} COOK, por ${CHEFS[ch.creator]})  -> ${event.args.challenge}`);
 
     // 2. Receitas
     for (const [author, recipeName] of ch.recipes) {
@@ -256,7 +283,7 @@ async function main() {
 
   // 5. Demonstração das regras (cada uma deve reverter)
   console.log("\nRegras sendo aplicadas pelos modifiers:");
-  const ctx = Object.assign([...created], { s: signers, factory });
+  const ctx = Object.assign([...created], { s: signers, factory, token, COOK });
   for (const demo of RULE_DEMOS) {
     try {
       await send(demo.run(ctx));
@@ -273,7 +300,7 @@ async function main() {
     summaries.map((s) => ({
       id: Number(s.id),
       desafio: s.name,
-      recompensa: `${ethers.formatEther(s.reward)} ETH`,
+      recompensa: `${fmt(s.reward)} COOK`,
       receitas: Number(s.recipeCount),
       votos: Number(s.totalVotes),
       estado: s.finalized ? (s.hasWinner ? "encerrado (premiado)" : "encerrado (sem votos)") : "aberto",
@@ -285,8 +312,13 @@ async function main() {
     const wins = await factory.winsOf(signers[i].address);
     if (wins > 0n) {
       const earned = await factory.earningsOf(signers[i].address);
-      console.log(`🏆 ${CHEFS[i]} (#${i}): ${wins} vitória(s), ${ethers.formatEther(earned)} ETH`);
+      console.log(`🏆 ${CHEFS[i]} (#${i}): ${wins} vitória(s), ${fmt(earned)} COOK`);
     }
+  }
+
+  console.log("\nSaldos de COOK:");
+  for (let i = 0; i < signers.length; i++) {
+    console.log(`   ${CHEFS[i].padEnd(6)} (#${i}): ${fmt(await token.balanceOf(signers[i].address))} COOK`);
   }
 
   console.log("\nSeed concluído. Contas #10 a #19 estão livres para importar no MetaMask.");

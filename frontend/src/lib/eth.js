@@ -1,5 +1,13 @@
 import { ethers } from "ethers";
-import { CHALLENGE_ABI, FACTORY_ABI, FACTORY_ADDRESS, TARGET_CHAIN, TARGET_CHAIN_ID } from "../config";
+import {
+  CHALLENGE_ABI,
+  FACTORY_ABI,
+  FACTORY_ADDRESS,
+  TARGET_CHAIN,
+  TARGET_CHAIN_ID,
+  TOKEN_ABI,
+  TOKEN_ADDRESS,
+} from "../config";
 
 // --------------------------------------------------------------------------
 // Providers e contratos
@@ -30,13 +38,21 @@ export function getChallenge(address, runner = getReadProvider()) {
   return new ethers.Contract(address, CHALLENGE_ABI, runner);
 }
 
+export function getToken(runner = getReadProvider()) {
+  return new ethers.Contract(TOKEN_ADDRESS, TOKEN_ABI, runner);
+}
+
 export async function getSigner() {
-  const provider = new ethers.BrowserProvider(window.ethereum);
+  // cacheTimeout -1: o ethers reaproveita por 250 ms respostas de chamadas
+  // idênticas (ex.: a simulação que falhou antes de um approve). Na escrita
+  // queremos sempre o estado atual da cadeia.
+  const provider = new ethers.BrowserProvider(window.ethereum, undefined, { cacheTimeout: -1 });
   return provider.getSigner();
 }
 
 export const factoryInterface = new ethers.Interface(FACTORY_ABI);
 export const challengeInterface = new ethers.Interface(CHALLENGE_ABI);
+export const tokenInterface = new ethers.Interface(TOKEN_ABI);
 
 // --------------------------------------------------------------------------
 // Conversões
@@ -86,6 +102,11 @@ export function shortAddress(addr) {
 export function formatEth(wei, digits = 4) {
   const value = Number(ethers.formatEther(wei ?? 0n));
   return value.toLocaleString("pt-BR", { maximumFractionDigits: digits });
+}
+
+/** COOK também tem 18 casas decimais; mostramos no máximo 2. */
+export function formatCook(units, digits = 2) {
+  return formatEth(units, digits);
 }
 
 export function explorerUrl(kind, value) {

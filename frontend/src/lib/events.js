@@ -1,10 +1,11 @@
-import { challengeInterface, getFactory, getReadProvider } from "./eth";
+import { challengeInterface, getFactory, getReadProvider, getToken } from "./eth";
 
 /**
  * Captura, em tempo real, os eventos emitidos pelos contratos do COOKOFF:
  *
  *  - CookoffFactory.ChallengeCreated / ChallengeFinalized  → via contract.on()
- *  - Challenge.RecipeSubmitted / VoteCast / RewardPending  → via provider.on()
+ *  - CookToken.WelcomeBonusClaimed / TokensPurchased       → via contract.on()
+ *  - Challenge.RecipeSubmitted / VoteCast                  → via provider.on()
  *    com filtro por tópico (pega os eventos de TODOS os desafios de uma vez).
  *    Como qualquer contrato poderia emitir um evento com a mesma assinatura,
  *    só repassamos logs de endereços que a fábrica confirma (isChallenge).
@@ -14,6 +15,7 @@ import { challengeInterface, getFactory, getReadProvider } from "./eth";
 export function subscribeCookoffEvents(onEvent) {
   const provider = getReadProvider();
   const factory = getFactory();
+  const token = getToken();
   const seen = new Set();
   const verified = new Map(); // address -> Promise<boolean>
 
@@ -52,8 +54,19 @@ export function subscribeCookoffEvents(onEvent) {
   factory.on("ChallengeCreated", onCreated);
   factory.on("ChallengeFinalized", onFinalized);
 
+  // ---- Eventos do token COOK ---------------------------------------------
+  const onBonus = (user, amount, payload) => {
+    emit({ type: "WelcomeBonusClaimed", user, amount, ...meta(payload.log) });
+  };
+  const onPurchase = (buyer, ethPaid, tokensMinted, payload) => {
+    emit({ type: "TokensPurchased", buyer, ethPaid, amount: tokensMinted, ...meta(payload.log) });
+  };
+
+  token.on("WelcomeBonusClaimed", onBonus);
+  token.on("TokensPurchased", onPurchase);
+
   // ---- Eventos dos contratos filhos (Challenge) ---------------------------
-  const topics = ["RecipeSubmitted", "VoteCast", "RewardPending"].map(
+  const topics = ["RecipeSubmitted", "VoteCast"].map(
     (name) => challengeInterface.getEvent(name).topicHash
   );
   const challengeFilter = { topics: [topics] };
@@ -95,8 +108,6 @@ export function subscribeCookoffEvents(onEvent) {
         votes: Number(parsed.args.newVoteCount),
         ...base,
       });
-    } else if (parsed.name === "RewardPending") {
-      emit({ type: "RewardPending", to: parsed.args.to, amount: parsed.args.amount, ...base });
     }
   };
 
@@ -105,6 +116,8 @@ export function subscribeCookoffEvents(onEvent) {
   return () => {
     factory.off("ChallengeCreated", onCreated);
     factory.off("ChallengeFinalized", onFinalized);
+    token.off("WelcomeBonusClaimed", onBonus);
+    token.off("TokensPurchased", onPurchase);
     provider.off(challengeFilter, onChallengeLog);
   };
 }

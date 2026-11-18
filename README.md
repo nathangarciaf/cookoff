@@ -1,16 +1,25 @@
 # 🍳 COOKOFF
 
-dApp de **desafios culinários** na rede de teste **Sepolia**. Qualquer pessoa pode criar um *Desafio* (ex.: “Desafio de Tortas Inusitadas”) depositando uma recompensa em ETH; a comunidade envia receitas temáticas e vota. Quando o prazo acaba (ou o criador encerra), o contrato paga automaticamente a receita mais votada.
+dApp de **desafios culinários** na rede de teste **Sepolia**. Qualquer pessoa pode criar um *Desafio* (ex.: “Desafio de Tortas Inusitadas”) oferecendo uma recompensa em **COOK**, o token do sistema; a comunidade envia receitas temáticas e vota. Quando o prazo acaba (ou o criador encerra), o contrato paga automaticamente a receita mais votada.
+
+## O token COOK
+
+As recompensas não usam ETH: usam o **CookToken (COOK)**, um ERC-20 próprio (OpenZeppelin). Os tokens são criados (*mint*) na hora:
+
+- **Bônus de boas-vindas:** ao entrar no sistema pela primeira vez, a carteira recebe **100 COOK grátis** (`claimWelcomeBonus`, uma vez por carteira).
+- **Compra:** pouco ETH vira muito COOK, à taxa fixa de **1 ETH = 1.000.000 COOK** (0,001 ETH = 1.000 COOK) via `buyTokens`.
+
+Só o criador de um desafio gasta COOK. Enviar receitas e votar é livre (paga-se apenas o gas da transação, em ETH).
 
 ## Regras
 
 - O nome do desafio **deve conter “Desafio”** (sem diferenciar maiúsculas/minúsculas), com 8–80 bytes.
-- O criador define a **duração** (1 minuto a 30 dias) e a **recompensa** (> 0 ETH, custodiada no contrato do desafio).
+- O criador define a **duração** (1 minuto a 30 dias) e a **recompensa** (> 0 COOK, custodiada no contrato do desafio).
+- Criar um desafio são duas transações: `approve` (autoriza a fábrica a mover seus COOK) e `createChallenge`.
 - Qualquer pessoa, inclusive o criador, pode enviar receitas (até 100 por desafio).
 - Cada carteira tem **2 votos por desafio**, em receitas diferentes, e **não pode votar na própria receita**.
 - O **criador pode encerrar a qualquer momento**; após o prazo, **qualquer pessoa** pode finalizar.
-- Vence a receita com mais votos; no empate, a enviada primeiro. Sem votos, a recompensa volta ao criador.
-- Se o envio do prêmio falhar (ex.: vencedor é um contrato que rejeita ETH), o valor fica disponível em `withdraw()`.
+- Vence a receita com mais votos; no empate, a enviada primeiro. Sem votos, os COOK voltam ao criador.
 
 ## Como os requisitos do projeto são atendidos
 
@@ -18,21 +27,21 @@ dApp de **desafios culinários** na rede de teste **Sepolia**. Qualquer pessoa p
 |---|---|
 | dApp com interface para interagir com o contrato | `frontend/` (React + Vite + ethers v6), build estático servível via HTTP |
 | Contratos na Sepolia | `npm run deploy:sepolia` (ver abaixo) |
-| **Modifiers** | `CookoffFactory`: `validChallengeName`, `withReward`, `validDuration`, `challengeExists`, `onlyChallenge` · `Challenge`: `onlyCreator`, `onlyOpen`, `notFinalized`, `onlyAfterDeadline`, `recipeExists`, `notOwnRecipe`, `hasVotesLeft`, `notVotedYet`, `validRecipeName`, `hasRoomForRecipes` |
-| **Eventos** capturados pela interface | Fábrica: `ChallengeCreated`, `ChallengeFinalized` · Desafio: `RecipeSubmitted`, `VoteCast`, `ChallengeFinalized`, `RewardPaid`, `RewardPending`, `Withdrawal`. O frontend escuta em tempo real (`frontend/src/lib/events.js`) e reage com feed “Ao vivo”, notificações, atualização dos placares, destaque animado da receita votada e confete quando você vence. |
-| **Contract Factory** | `CookoffFactory.createChallenge()` implanta um novo `Challenge` com `new Challenge{value: ...}(...)` |
+| **Modifiers** | `CookoffFactory`: `validChallengeName`, `withReward`, `validDuration`, `canFundReward`, `challengeExists`, `onlyChallenge` · `Challenge`: `onlyCreator`, `onlyOpen`, `notFinalized`, `onlyAfterDeadline`, `recipeExists`, `notOwnRecipe`, `hasVotesLeft`, `notVotedYet`, `validRecipeName`, `hasRoomForRecipes` · `CookToken`: `bonusNotClaimed`, `withEth`, `onlyOwner` |
+| **Eventos** capturados pela interface | Fábrica: `ChallengeCreated`, `ChallengeFinalized` · Desafio: `RecipeSubmitted`, `VoteCast`, `ChallengeFinalized`, `RewardPaid` · Token: `WelcomeBonusClaimed`, `TokensPurchased`, `Transfer`, `EthWithdrawn`. O frontend escuta em tempo real (`frontend/src/lib/events.js` e `App.jsx`) e reage com feed “Ao vivo”, notificações, atualização dos placares e do saldo de COOK, destaque animado da receita votada e confete quando você vence. |
+| **Contract Factory** | `CookoffFactory.createChallenge()` implanta um novo `Challenge` com `new Challenge(...)` e transfere para ele a recompensa em COOK |
 | Fábrica **chama** os contratos criados | `finalizeChallenge(id)` → `Challenge.finalize()`; `getChallengeSummary(id)` / `getAllSummaries()` → `Challenge.getSummary()`. E o filho chama de volta `onChallengeFinalized()` para atualizar o ranking (`winsOf`, `earningsOf`). |
-| **Testes unitários** | `test/Cookoff.js` (Hardhat + Mocha/Chai, 27 testes) |
+| **Testes unitários** | `test/Cookoff.js` (Hardhat + Mocha/Chai, 34 testes) |
 
 ## Estrutura
 
 ```
 contracts/
+  CookToken.sol          token ERC-20 COOK (bônus de boas-vindas + compra com ETH)
   CookoffFactory.sol     contrato principal (factory + ranking)
-  Challenge.sol          um desafio: receitas, votos, prêmio
-  mocks/RejectingChef.sol  auxiliar de teste (contrato que rejeita ETH)
+  Challenge.sol          um desafio: receitas, votos, prêmio em COOK
 test/Cookoff.js          testes unitários
-scripts/deploy.js        implanta a fábrica e exporta ABI/endereço p/ o frontend
+scripts/deploy.js        implanta token + fábrica e exporta ABIs/endereços p/ o frontend
 scripts/seed.js          dados de exemplo na rede local
 frontend/                dApp (Vite + React + ethers v6)
   src/contracts/         ABIs + addresses.json (gerados pelo deploy)
@@ -48,7 +57,7 @@ npm --prefix frontend install
 npm test                 # testes dos contratos
 ```
 
-Em um terminal, suba a rede local:
+Em um terminal, suba a rede local (ela mostra 20 contas de teste com 10.000 ETH cada):
 
 ```bash
 npx hardhat node
@@ -58,14 +67,13 @@ Em outro, implante, popule e abra o frontend:
 
 ```bash
 npm run deploy:local
-npm run seed:local       # opcional: desafios/receitas de exemplo
-VITE_CHAIN_ID=31337 
+npm run seed:local       # opcional: 11 desafios, 41 receitas, 55 votos de exemplo
 npm run frontend
 ```
 
-Abra http://localhost:5173. No MetaMask, importe uma das chaves privadas exibidas pelo `npx hardhat node` (contas de teste da rede local) e use a rede `localhost:8545` (chainId 31337) — o app oferece adicioná-la.
+Abra http://localhost:5173. No MetaMask, adicione a rede `http://127.0.0.1:8545` (chainId 31337, o app oferece adicioná-la) e importe a chave privada de uma das contas exibidas pelo `npx hardhat node`. O seed usa as contas #0–#9; as #10–#19 ficam livres para você testar como usuário novo (e ganhar o bônus ao entrar).
 
-> Se o MetaMask reclamar de *nonce* depois de reiniciar o `hardhat node`, use *Configurações → Avançado → Limpar dados da aba de atividades*.
+> Toda vez que o `hardhat node` reinicia, a rede volta do zero: rode `deploy:local` (e o seed) de novo e, no MetaMask, use *Configurações → Avançado → Limpar dados da aba de atividades* para resetar o *nonce*.
 
 ## Implantando na Sepolia
 
@@ -76,13 +84,14 @@ Abra http://localhost:5173. No MetaMask, importe uma das chaves privadas exibida
    npx hardhat vars set ETHERSCAN_API_KEY      # opcional, para verificar
    ```
    Use uma carteira **só de testes** com SepoliaETH de um faucet.
-2. Implante (grava o endereço em `frontend/src/contracts/addresses.json`):
+2. Implante (grava os endereços em `frontend/src/contracts/addresses.json`):
    ```bash
    npm run deploy:sepolia
    ```
-3. (Opcional) verifique o código no Etherscan:
+3. (Opcional) verifique o código no Etherscan (o script imprime os comandos prontos):
    ```bash
-   npx hardhat verify --network sepolia <ENDERECO_DA_FABRICA>
+   npx hardhat verify --network sepolia <ENDERECO_DO_TOKEN>
+   npx hardhat verify --network sepolia <ENDERECO_DA_FABRICA> <ENDERECO_DO_TOKEN>
    ```
 4. Faça commit do `addresses.json` atualizado.
 
@@ -96,7 +105,9 @@ npm run frontend:build    # gera frontend/dist (site estático)
 
 Variáveis opcionais do frontend (ver `frontend/.env.example`):
 
-- `VITE_CHAIN_ID` — `11155111` (Sepolia) ou `31337` (local). Padrão: Sepolia, se houver endereço implantado lá.
+- `VITE_CHAIN_ID` — `11155111` (Sepolia) ou `31337` (local). Padrão: Sepolia, se houver endereço implantado lá; senão, local.
 - `VITE_RPC_URL` — RPC usado para leitura e escuta de eventos. Padrão Sepolia: `https://ethereum-sepolia-rpc.publicnode.com`.
+
+As variáveis precisam estar na mesma linha do comando (`VITE_CHAIN_ID=31337 npm run frontend`) ou num arquivo `frontend/.env`.
 
 A leitura dos desafios e a captura de eventos funcionam mesmo sem carteira conectada; a carteira só é necessária para assinar transações.

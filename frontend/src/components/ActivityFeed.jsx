@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useCookoff } from "../context";
-import { formatEth, shortAddress } from "../lib/eth";
+import { formatCook, formatEth, shortAddress } from "../lib/eth";
 import { timeAgo } from "../lib/status";
 
 const ZERO = "0x0000000000000000000000000000000000000000";
@@ -8,7 +8,7 @@ const ZERO = "0x0000000000000000000000000000000000000000";
 function describe(ev) {
   switch (ev.type) {
     case "ChallengeCreated":
-      return { icon: "🆕", text: <>Novo desafio <b>{ev.name}</b> valendo {formatEth(ev.reward)} ETH</> };
+      return { icon: "🆕", text: <>Novo desafio <b>{ev.name}</b> valendo {formatCook(ev.reward)} COOK</> };
     case "RecipeSubmitted":
       return { icon: "🍽️", text: <><b>{ev.name}</b> entrou em {ev.challengeName}</> };
     case "VoteCast":
@@ -18,13 +18,18 @@ function describe(ev) {
         icon: "🏁",
         text:
           ev.winner && ev.winner !== ZERO ? (
-            <>{ev.challengeName} encerrado — {shortAddress(ev.winner)} levou {formatEth(ev.reward)} ETH</>
+            <>{ev.challengeName} encerrado — {shortAddress(ev.winner)} levou {formatCook(ev.reward)} COOK</>
           ) : (
             <>{ev.challengeName} encerrado sem votos</>
           ),
       };
-    case "RewardPending":
-      return { icon: "💰", text: <>Recompensa aguardando saque em {ev.challengeName}</> };
+    case "WelcomeBonusClaimed":
+      return { icon: "🎁", text: <>{shortAddress(ev.user)} entrou e ganhou {formatCook(ev.amount)} COOK</> };
+    case "TokensPurchased":
+      return {
+        icon: "🪙",
+        text: <>{shortAddress(ev.buyer)} comprou {formatCook(ev.amount)} COOK por {formatEth(ev.ethPaid)} ETH</>,
+      };
     default:
       return { icon: "•", text: ev.type };
   }
@@ -53,7 +58,7 @@ export function ActivityFeed() {
             return (
               <li key={`${ev.txHash}-${ev.logIndex}`} className="feed-item">
                 <span className="feed-icon">{icon}</span>
-                <a href={`#/desafio/${ev.challenge}`} className="feed-text">
+                <a href={ev.challenge ? `#/desafio/${ev.challenge}` : "#/"} className="feed-text">
                   {text}
                   <small>{timeAgo(ev.receivedAt)}</small>
                 </a>

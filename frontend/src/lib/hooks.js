@@ -60,6 +60,7 @@ export function useWallet() {
       const current = Number(await window.ethereum.request({ method: "eth_chainId" }));
       setChainId(current);
       if (current !== TARGET_CHAIN_ID) await switchNetwork();
+      return accounts[0] ?? null;
     } finally {
       setConnecting(false);
     }

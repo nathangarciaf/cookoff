@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useCookoff } from "../context";
-import { formatEth } from "../lib/eth";
+import { formatCook } from "../lib/eth";
 import { Chef } from "./Chef";
 
 const MEDALS = ["🥇", "🥈", "🥉"];
@@ -35,7 +35,7 @@ export function Leaderboard() {
               <span className="grow" />
               <span className="lb-stat">
                 <b>{r.wins}</b> {r.wins === 1 ? "vitória" : "vitórias"}
-                <small>{formatEth(r.earned)} ETH</small>
+                <small>{formatCook(r.earned)} COOK</small>
               </span>
             </li>
           ))}

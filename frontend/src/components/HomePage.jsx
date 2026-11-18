@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { useCookoff } from "../context";
-import { formatEth, sameAddress } from "../lib/eth";
+import { formatCook, sameAddress } from "../lib/eth";
 import { useNow } from "../lib/hooks";
 import { challengeStatus } from "../lib/status";
 import { CreateChallenge } from "./CreateChallenge";
 import { ChallengeCard } from "./ChallengeCard";
 import { Leaderboard } from "./Leaderboard";
 import { ActivityFeed } from "./ActivityFeed";
+import { CookWallet } from "./CookWallet";
 
 const FILTERS = [
   { key: "open", label: "Abertos" },
@@ -57,15 +58,15 @@ export function HomePage() {
             <em>Que vença a melhor receita.</em>
           </h1>
           <p className="hero-sub">
-            Crie um desafio com uma recompensa em ETH, a comunidade envia receitas temáticas e vota. Quando o prazo
-            acaba, o contrato paga automaticamente quem tiver mais votos.
+            Crie um desafio com uma recompensa em COOK, o token do COOKOFF. A comunidade envia receitas temáticas e
+            vota; quando o prazo acaba, o contrato paga automaticamente quem tiver mais votos.
           </p>
         </div>
         <div className="stats">
           <Stat value={stats.open} label="desafios abertos" />
-          <Stat value={`${formatEth(stats.inPlay, 3)} Ξ`} label="em recompensas no jogo" />
+          <Stat value={`${formatCook(stats.inPlay, 0)} 🪙`} label="COOK em recompensas no jogo" />
           <Stat value={stats.recipes} label="receitas enviadas" />
-          <Stat value={`${formatEth(stats.paid, 3)} Ξ`} label="já pagos aos chefs" />
+          <Stat value={`${formatCook(stats.paid, 0)} 🪙`} label="COOK já pagos aos chefs" />
         </div>
       </section>
 
@@ -119,6 +120,7 @@ export function HomePage() {
         </div>
 
         <aside className="side-col">
+          <CookWallet />
           <Leaderboard />
           <ActivityFeed />
         </aside>

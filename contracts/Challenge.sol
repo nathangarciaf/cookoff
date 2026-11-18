@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
 /// @dev Interface mínima da fábrica, usada pelo desafio para avisá-la quando
 ///      for finalizado (o desafio "chama de volta" o contrato que o criou).
 interface ICookoffFactory {
@@ -9,9 +12,12 @@ interface ICookoffFactory {
 
 /// @title Challenge — um desafio culinário do COOKOFF
 /// @notice Cada desafio é um contrato criado pela CookoffFactory. Ele guarda a
-///         recompensa (em ETH) proposta pelo criador, recebe receitas, contabiliza
-///         votos e paga a recompensa à receita mais votada quando é encerrado.
+///         recompensa (em tokens COOK) proposta pelo criador, recebe receitas,
+///         contabiliza votos e paga a recompensa à receita mais votada quando é
+///         encerrado.
 contract Challenge {
+    using SafeERC20 for IERC20;
+
     // ------------------------------------------------------------------
     // Constantes
     // ------------------------------------------------------------------
@@ -51,9 +57,10 @@ contract Challenge {
     // Estado
     // ------------------------------------------------------------------
     address public immutable factory;
+    IERC20 public immutable rewardToken; // CookToken (COOK)
     address public immutable creator;
     uint256 public immutable challengeId;
-    uint256 public immutable reward;
+    uint256 public immutable reward; // em COOK (18 casas decimais)
     uint256 public immutable createdAt;
     uint256 public immutable deadline;
     string public name;
@@ -68,9 +75,6 @@ contract Challenge {
     Recipe[] private recipes;
     mapping(address => uint8) public votesUsed;
     mapping(address => mapping(uint256 => bool)) public hasVotedFor;
-    /// @notice Valores que não puderam ser enviados automaticamente (ex.: o
-    ///         destinatário é um contrato que rejeita ETH) e aguardam saque.
-    mapping(address => uint256) public pendingWithdrawals;
 
     // ------------------------------------------------------------------
     // Eventos
@@ -85,8 +89,6 @@ contract Challenge {
         bool closedEarly
     );
     event RewardPaid(address indexed to, uint256 amount);
-    event RewardPending(address indexed to, uint256 amount);
-    event Withdrawal(address indexed to, uint256 amount);
 
     // ------------------------------------------------------------------
     // Modifiers
@@ -145,15 +147,18 @@ contract Challenge {
     }
 
     // ------------------------------------------------------------------
-    // Construtor (chamado pela fábrica, que envia a recompensa como msg.value)
+    // Construtor (chamado pela fábrica). Logo após criar o contrato, a fábrica
+    // transfere `_reward` COOK do criador para cá.
     // ------------------------------------------------------------------
     constructor(
         uint256 _challengeId,
         string memory _name,
         address _creator,
-        uint256 _deadline
-    ) payable {
-        require(msg.value > 0, "Recompensa obrigatoria");
+        uint256 _deadline,
+        IERC20 _rewardToken,
+        uint256 _reward
+    ) {
+        require(_reward > 0, "Recompensa obrigatoria");
         require(_deadline > block.timestamp, "Prazo invalido");
         factory = msg.sender;
         challengeId = _challengeId;
@@ -161,7 +166,8 @@ contract Challenge {
         creator = _creator;
         deadline = _deadline;
         createdAt = block.timestamp;
-        reward = msg.value;
+        rewardToken = _rewardToken;
+        reward = _reward;
     }
 
     // ------------------------------------------------------------------
@@ -215,16 +221,6 @@ contract Challenge {
     ///         finalizar o desafio e liberar a recompensa.
     function finalize() external notFinalized onlyAfterDeadline {
         _finalize(false);
-    }
-
-    /// @notice Saque de valores que não puderam ser enviados automaticamente.
-    function withdraw() external {
-        uint256 amount = pendingWithdrawals[msg.sender];
-        require(amount > 0, "Nada para sacar");
-        pendingWithdrawals[msg.sender] = 0;
-        (bool ok, ) = payable(msg.sender).call{value: amount}("");
-        require(ok, "Falha no saque");
-        emit Withdrawal(msg.sender, amount);
     }
 
     // ------------------------------------------------------------------
@@ -303,14 +299,9 @@ contract Challenge {
         // Avisa a fábrica (atualiza o ranking global)
         ICookoffFactory(factory).onChallengeFinalized(winner, hasWinner ? reward : 0);
 
-        // Paga a recompensa (ou devolve ao criador). Se o envio falhar, o valor
-        // fica disponível para saque via withdraw().
-        (bool ok, ) = payable(recipient).call{value: reward}("");
-        if (ok) {
-            emit RewardPaid(recipient, reward);
-        } else {
-            pendingWithdrawals[recipient] += reward;
-            emit RewardPending(recipient, reward);
-        }
+        // Paga a recompensa em COOK (ou devolve ao criador). Interação externa
+        // por último, depois de todo o estado atualizado.
+        rewardToken.safeTransfer(recipient, reward);
+        emit RewardPaid(recipient, reward);
     }
 }
